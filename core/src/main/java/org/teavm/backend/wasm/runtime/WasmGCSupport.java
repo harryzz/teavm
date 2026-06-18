@@ -15,8 +15,11 @@
  */
 package org.teavm.backend.wasm.runtime;
 
+import org.teavm.classlib.PlatformDetector;
+import org.teavm.interop.Address;
 import org.teavm.interop.Import;
 import org.teavm.interop.Intrinsified;
+import org.teavm.runtime.heap.Heap;
 
 public class WasmGCSupport {
     private static int lastObjectId = 1831433054;
@@ -53,11 +56,64 @@ public class WasmGCSupport {
         return x;
     }
 
+    public static void putCharStdout(char c) {
+        if (PlatformDetector.isWebAssemblyGCWasi()) {
+            wasiWrite(1, c);
+        } else {
+            putCharStdoutJS(c);
+        }
+    }
+
+    public static void putCharStderr(char c) {
+        if (PlatformDetector.isWebAssemblyGCWasi()) {
+            wasiWrite(2, c);
+        } else {
+            putCharStderrJS(c);
+        }
+    }
+
     @Import(name = "putcharStdout", module = "teavmConsole")
-    public static native void putCharStdout(char c);
+    private static native void putCharStdoutJS(char c);
 
     @Import(name = "putcharStderr", module = "teavmConsole")
-    public static native void putCharStderr(char c);
+    private static native void putCharStderrJS(char c);
+
+    // task 113 WASI floor: write one byte to fd via wasi_snapshot_preview1.fd_write.
+    @Import(name = "fd_write", module = "wasi_snapshot_preview1")
+    private static native int wasiFdWrite(int fd, int iovs, int iovsLen, int nwrittenPtr);
+
+    private static int wasiScratch;
+
+    private static void wasiWrite(int fd, char c) {
+        var scratch = wasiScratch;
+        if (scratch == 0) {
+            // 4-aligned: [0..4]=iovec.buf, [4..8]=iovec.len, [8..12]=nwritten, [12]=byte
+            scratch = (Heap.alloc(20).toInt() + 3) & ~3;
+            wasiScratch = scratch;
+        }
+        Address.fromInt(scratch + 12).putByte((byte) c);
+        Address.fromInt(scratch).putInt(scratch + 12);
+        Address.fromInt(scratch + 4).putInt(1);
+        wasiFdWrite(fd, scratch, 1, scratch + 8);
+    }
+
+    // task 113 WASI floor: real wall clock via wasi_snapshot_preview1.clock_time_get.
+    // Returns milliseconds since the epoch as f64 (the SystemIntrinsic converts to long).
+    @Import(name = "clock_time_get", module = "wasi_snapshot_preview1")
+    private static native int wasiClockTimeGet(int clockId, long precision, int resultPtr);
+
+    private static int clockScratch;
+
+    public static double currentTimeMillis() {
+        var scratch = clockScratch;
+        if (scratch == 0) {
+            scratch = (Heap.alloc(16).toInt() + 7) & ~7; // 8-byte-aligned u64 timestamp slot
+            clockScratch = scratch;
+        }
+        wasiClockTimeGet(0, 1000, scratch); // clock id 0 = realtime, 1us precision
+        long ns = Address.fromInt(scratch).getLong();
+        return ns / 1_000_000.0;
+    }
 
     public static char[] nextCharArray() {
         var length = nextLEB();

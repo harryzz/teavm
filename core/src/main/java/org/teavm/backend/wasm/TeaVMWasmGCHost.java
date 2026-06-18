@@ -28,4 +28,7 @@ public interface TeaVMWasmGCHost extends TeaVMHostExtension {
     void addMethodsOnCallSites(Supplier<Collection<MethodReference>> methodsOnCallSites);
 
     void contributeToCodeGen(WasmGCCodeGenContributor contributor);
+
+    /** True when targeting a non-JS (WASI) host: no JSO interop, no js-string. */
+    boolean isWasi();
 }

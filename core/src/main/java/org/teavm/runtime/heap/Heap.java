@@ -15,6 +15,7 @@
  */
 package org.teavm.runtime.heap;
 
+import org.teavm.classlib.PlatformDetector;
 import org.teavm.interop.Address;
 import org.teavm.interop.Export;
 import org.teavm.interop.Import;
@@ -212,8 +213,14 @@ public final class Heap {
         return grownBytes >= bytes;
     }
 
+    private static void notifyHeapResized() {
+        if (!PlatformDetector.isWebAssemblyGCWasi()) {
+            notifyHeapResizedJS(); // task 113: WASI self-manages the heap, no host callback
+        }
+    }
+
     @Import(module = "teavmMemory", name = "notifyHeapResized")
-    private static native void notifyHeapResized();
+    private static native void notifyHeapResizedJS();
 
     private static HeapNode lastRecord() {
         HeapRecord record = start.toStructure();

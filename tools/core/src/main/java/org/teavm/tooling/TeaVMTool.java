@@ -358,7 +358,9 @@ public class TeaVMTool {
             case JAVASCRIPT:
                 return prepareJavaScriptTarget();
             case WEBASSEMBLY_GC:
-                return prepareWebAssemblyGCTarget();
+                return prepareWebAssemblyGCTarget(false);
+            case WEBASSEMBLY_GC_WASI:
+                return prepareWebAssemblyGCTarget(true);
             case C:
                 return prepareCTarget();
         }
@@ -379,8 +381,9 @@ public class TeaVMTool {
         return javaScriptTarget;
     }
 
-    private WasmGCTarget prepareWebAssemblyGCTarget() {
+    private WasmGCTarget prepareWebAssemblyGCTarget(boolean wasi) {
         var target = new WasmGCTarget();
+        target.setWasi(wasi);
         target.setObfuscated(obfuscated);
         target.setStrict(strict);
         target.setDebugInfo(debugInformationGenerated);
@@ -552,6 +555,7 @@ public class TeaVMTool {
                 case JAVASCRIPT:
                     return "classes.js";
                 case WEBASSEMBLY_GC:
+                case WEBASSEMBLY_GC_WASI:
                     return "classes.wasm";
                 case C:
                     return "classes.c";

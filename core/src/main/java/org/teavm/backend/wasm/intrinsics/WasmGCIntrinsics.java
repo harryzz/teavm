@@ -79,12 +79,12 @@ public class WasmGCIntrinsics {
 
     public static void apply(ReflectionDependencyListener reflection, WasmGCCodeGenContext ctx,
             IntrinsicRegistry<WasmGCInlineIntrinsic> inlineReg,
-            IntrinsicRegistry<WasmGCBodyIntrinsic> bodyReg) {
+            IntrinsicRegistry<WasmGCBodyIntrinsic> bodyReg, boolean wasi) {
         inlineReg.registerIntrinsic(WasmRuntime.class, new WasmRuntimeIntrinsic());
         inlineReg.registerIntrinsic(Object.class, new ObjectIntrinsic(ctx.classInfoProvider(), ctx.functionTypes()),
                 "getClassInfo", "getMonitor", "setMonitor", "wasmGCIdentity", "setWasmGCIdentity",
                 "cloneObject");
-        fillSystem(inlineReg, ctx);
+        fillSystem(inlineReg, ctx, wasi);
         inlineReg.registerIntrinsic(Heap.class, new HeapIntrinsic());
         inlineReg.registerIntrinsic(Address.class, new AddressIntrinsic(ctx.classInfoProvider(), ctx.functions()));
         inlineReg.registerIntrinsic(Structure.class, new StructureIntrinsic(ctx.classInfoProvider()));
@@ -155,13 +155,14 @@ public class WasmGCIntrinsics {
     }
 
     private static void fillSystem(IntrinsicRegistry<WasmGCInlineIntrinsic> reg,
-            WasmGCCodeGenContext ctx) {
+            WasmGCCodeGenContext ctx, boolean wasi) {
         var arrayCopyIntrinsic = new SystemArrayCopyIntrinsic(ctx.hierarchy(), ctx.module(), ctx.functions(),
                 ctx.classInfoProvider(), ctx.typeMapper(), ctx.functionTypes(), ctx.names(), ctx.exceptionTag());
         reg.registerIntrinsic(new MethodReference(System.class, "arraycopy", Object.class, int.class, Object.class,
                 int.class, int.class, void.class), arrayCopyIntrinsic);
         reg.registerIntrinsic(new MethodReference(System.class, "doArrayCopy", Object.class, int.class, Object.class,
                 int.class, int.class, void.class), arrayCopyIntrinsic);
-        reg.registerIntrinsic(System.class, new SystemIntrinsic(ctx.functionTypes(), ctx.module()));
+        reg.registerIntrinsic(System.class, new SystemIntrinsic(ctx.functionTypes(), ctx.module(),
+                ctx.functions(), wasi));
     }
 }

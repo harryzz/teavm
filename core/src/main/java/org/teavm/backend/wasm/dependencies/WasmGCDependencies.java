@@ -22,6 +22,7 @@ import org.teavm.backend.wasm.runtime.WasmGCSupport;
 import org.teavm.dependency.AbstractDependencyListener;
 import org.teavm.dependency.DependencyAgent;
 import org.teavm.dependency.DependencyAnalyzer;
+import org.teavm.dependency.MethodDependency;
 import org.teavm.interop.Address;
 import org.teavm.model.MethodReader;
 import org.teavm.model.MethodReference;
@@ -75,6 +76,24 @@ public class WasmGCDependencies {
         analyzer.linkMethod(new MethodReference(String.class, "charAt", int.class, char.class))
                 .propagate(0, analyzer.getClassType("java.lang.String"))
                 .use();
+    }
+
+    // task 113 WASI floor: the clock helper is reached only from codegen (SystemIntrinsic), so the
+    // dependency analyzer can't see it on its own. Link it precisely -- only when the guest actually
+    // references System.currentTimeMillis -- so guests that never read the clock import no
+    // clock_time_get. Gated to WASI builds (the browser target routes through teavmDate instead).
+    public void contributeWasi() {
+        analyzer.addDependencyListener(new AbstractDependencyListener() {
+            @Override
+            public void methodReached(DependencyAgent agent, MethodDependency method) {
+                var ref = method.getReference();
+                if (ref.getClassName().equals(System.class.getName())
+                        && ref.getName().equals("currentTimeMillis")) {
+                    agent.linkMethod(new MethodReference(WasmGCSupport.class, "currentTimeMillis",
+                            double.class)).use();
+                }
+            }
+        });
     }
 
     private void contributeWasmRuntime() {

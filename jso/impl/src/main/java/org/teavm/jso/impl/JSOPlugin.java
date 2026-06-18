@@ -81,7 +81,7 @@ public class JSOPlugin implements TeaVMPlugin {
             installForJS(jsHost);
         }
 
-        if (wasmGCHost != null) {
+        if (wasmGCHost != null && !wasmGCHost.isWasi()) {
             classTransformer.setClassFilter(n -> !n.startsWith("java."));
             classTransformer.forWasmGC();
             WasmGCJso.install(host, wasmGCHost, repository);

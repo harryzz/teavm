@@ -118,8 +118,12 @@ public class TThrowable extends RuntimeException {
         if (PlatformDetector.isLowLevel()) {
             stackTrace = (TStackTraceElement[]) (Object) ExceptionHandling.fillStackTrace();
         } else if (PlatformDetector.isWebAssemblyGC()) {
-            lazyStackTrace = takeWasmGCStack(JSString.valueOf(getClass().getName()));
-            decorateException(this);
+            if (PlatformDetector.isWebAssemblyGCWasi()) {
+                stackTrace = new TStackTraceElement[0]; // task 113 WASI: no JS stack capture
+            } else {
+                lazyStackTrace = takeWasmGCStack(JSString.valueOf(getClass().getName()));
+                decorateException(this);
+            }
         }
         return this;
     }
@@ -136,28 +140,26 @@ public class TThrowable extends RuntimeException {
     @Import(name = "decorateException")
     private static native void decorateException(Object obj);
 
-    private void ensureStackTrace() {
-        if (PlatformDetector.isWebAssemblyGC()) {
-            if (lazyStackTrace != null) {
-                var supplier = lazyStackTrace;
-                lazyStackTrace = null;
-                var nativeStack = supplier.getStack();
-                if (nativeStack == null) {
-                    return;
-                }
-                var stack = new TStackTraceElement[nativeStack.getLength()];
-                for (var i = 0; i < nativeStack.getLength(); ++i) {
-                    var frame = nativeStack.get(i);
-                    stack[i] = new TStackTraceElement(frame.getClassName(), frame.getMethod(), frame.getFile(),
-                            frame.getLine());
-                }
-                stackTrace = stack;
-            }
-        }
-    }
-
     @Import(name = "takeStackTrace")
     private static native LazyStackSupplier takeWasmGCStack(JSObject exceptionClassName);
+
+    private void ensureStackTrace() {
+        if (PlatformDetector.isWebAssemblyGC() && lazyStackTrace != null) {
+            var supplier = lazyStackTrace;
+            lazyStackTrace = null;
+            var nativeStack = supplier.getStack();
+            if (nativeStack == null) {
+                return;
+            }
+            var stack = new TStackTraceElement[nativeStack.getLength()];
+            for (var i = 0; i < nativeStack.getLength(); ++i) {
+                var frame = nativeStack.get(i);
+                stack[i] = new TStackTraceElement(frame.getClassName(), frame.getMethod(), frame.getFile(),
+                        frame.getLine());
+            }
+            stackTrace = stack;
+        }
+    }
 
     @Rename("getMessage")
     public String getMessage0() {

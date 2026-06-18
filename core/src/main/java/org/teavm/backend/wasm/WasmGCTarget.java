@@ -54,6 +54,7 @@ import org.teavm.backend.wasm.intrinsics.WasmGCResourcesIntrinsic;
 import org.teavm.backend.wasm.model.WasmCustomSection;
 import org.teavm.backend.wasm.model.WasmFunction;
 import org.teavm.backend.wasm.model.WasmGlobal;
+import org.teavm.backend.wasm.model.instruction.WasmInt32Constant;
 import org.teavm.backend.wasm.model.WasmLocal;
 import org.teavm.backend.wasm.model.WasmModule;
 import org.teavm.backend.wasm.model.WasmTag;
@@ -110,6 +111,7 @@ public class WasmGCTarget implements TeaVMTarget, TeaVMWasmGCHost {
     private BoundCheckInsertion boundCheckInsertion = new BoundCheckInsertion();
     private boolean strict;
     private boolean obfuscated;
+    private boolean wasi;
     private boolean debugInfo;
     private boolean compactMode;
     private SourceMapBuilder sourceMapBuilder;
@@ -133,6 +135,15 @@ public class WasmGCTarget implements TeaVMTarget, TeaVMWasmGCHost {
 
     public void setObfuscated(boolean obfuscated) {
         this.obfuscated = obfuscated;
+    }
+
+    public void setWasi(boolean wasi) {
+        this.wasi = wasi;
+    }
+
+    @Override
+    public boolean isWasi() {
+        return wasi;
     }
 
     public void setStrict(boolean strict) {
@@ -220,6 +231,9 @@ public class WasmGCTarget implements TeaVMTarget, TeaVMWasmGCHost {
         var deps = new WasmGCDependencies(dependencyAnalyzer);
         deps.contribute();
         deps.contributeStandardExports();
+        if (wasi) {
+            deps.contributeWasi(); // task 113 WASI floor: pull in the clock helper (clock_time_get)
+        }
 
         var reflectionSuppliers = new ArrayList<ReflectionSupplier>();
         for (var supplier : ServiceLoader.load(ReflectionSupplier.class, dependencyAnalyzer.getClassLoader())) {
@@ -254,7 +268,9 @@ public class WasmGCTarget implements TeaVMTarget, TeaVMWasmGCHost {
 
     @Override
     public String[] getPlatformTags() {
-        return new String[] { Platforms.WEBASSEMBLY_GC };
+        return wasi
+                ? new String[] { Platforms.WEBASSEMBLY_GC, Platforms.WEBASSEMBLY_GC_WASI }
+                : new String[] { Platforms.WEBASSEMBLY_GC };
     }
 
     @Override
@@ -281,8 +297,12 @@ public class WasmGCTarget implements TeaVMTarget, TeaVMWasmGCHost {
     @Override
     public void emit(ListableClassHolderSource classes, BuildTarget buildTarget, String outputName) throws IOException {
         var module = new WasmModule();
-        module.memoryImportName = "memory";
-        module.memoryImportModule = "env";
+        if (!wasi) {
+            module.memoryImportName = "memory";
+            module.memoryImportModule = "env";
+        } else {
+            module.memoryExportName = "memory"; // task 113 WASI: export linear memory so wasi fd_write can read iovecs
+        }
         addMethodsOnCallSites(reflection::getVirtualCallSites);
         var inlineIntrinsics = new DefaultIntrinsicRegistry<WasmGCInlineIntrinsic>(classes);
         var bodyIntrinsics = new DefaultIntrinsicRegistry<WasmGCBodyIntrinsic>(classes);
@@ -318,7 +338,7 @@ public class WasmGCTarget implements TeaVMTarget, TeaVMWasmGCHost {
         var codeGenContext = createCodeGenContext(classes, declarationsGenerator,
                 asyncMethodFinder.getAsyncFamilyMethods());
         var codeGenRegistry = createCodeGenRegistry(inlineIntrinsics, bodyIntrinsics);
-        WasmGCIntrinsics.apply(reflection, codeGenContext, inlineIntrinsics, bodyIntrinsics);
+        WasmGCIntrinsics.apply(reflection, codeGenContext, inlineIntrinsics, bodyIntrinsics, wasi);
         for (var contributor : intrinsicContributors) {
             contributor.contribute(codeGenContext, codeGenRegistry);
         }
@@ -495,16 +515,25 @@ public class WasmGCTarget implements TeaVMTarget, TeaVMWasmGCHost {
             memorySize = Math.max(memorySize, segment.getOffset() + segment.getLength());
         }
 
+        var nojso = wasi;
         var heapOffset = new WasmGlobal("heapOffset", WasmType.INT32);
         heapOffset.setImmutable(true);
-        heapOffset.setImportModule("teavmMemory");
-        heapOffset.setImportName("heapOffset");
+        if (nojso) {
+            heapOffset.getInitialValue().add(new WasmInt32Constant(memorySize)); // task 113: heap starts past static data
+        } else {
+            heapOffset.setImportModule("teavmMemory");
+            heapOffset.setImportName("heapOffset");
+        }
         module.globals.add(heapOffset);
 
         var maxSize = new WasmGlobal("maxSize", WasmType.INT32);
         maxSize.setImmutable(true);
-        maxSize.setImportModule("teavmMemory");
-        maxSize.setImportName("maxSize");
+        if (nojso) {
+            maxSize.getInitialValue().add(new WasmInt32Constant(0x7FFFFFFF));
+        } else {
+            maxSize.setImportModule("teavmMemory");
+            maxSize.setImportName("maxSize");
+        }
         module.globals.add(maxSize);
 
         dataSize = memorySize;
